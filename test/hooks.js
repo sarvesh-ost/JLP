@@ -1,5 +1,7 @@
 'use strict';
 
+const Web3 = require('web3');
+const ZeroClientProvider = require('../src/connection/zero_client_provider');
 /**
  * @file contains hooks that are executed across the entire test suite.
  * The `before` hook is executed at the beginning of a test run. The `afterEach` hook is executed
@@ -9,12 +11,82 @@
  * test only needs to update the configuration object with the updated values.
  */
 
-const Web3 = require('web3');
 const { CONFIG_FILE_PATH } = require('./constants');
 const ChainConfig = require('../src/config/chain_config');
-const Connection = require('../src/connection');
 const shared = require('./shared');
 const funder = require('./funder');
+
+const setupProvider = (
+  chainConfig,
+  originAccount,
+  auxiliaryAccount,
+) => {
+  const originAddresses = Object.keys(originAccount).map(a => originAccount[a].address);
+  const auxiliaryAddresses = Object.keys(auxiliaryAccount).map(a => auxiliaryAccount[a].address);
+
+  const originAccountAddressVsAccount = {};
+  const auxiliaryAccountAddressVsAccount = {};
+
+
+  Object.keys(originAccount).forEach(
+    (a) => {
+      originAccountAddressVsAccount[originAccount[a].address.toLowerCase()] = originAccount[a];
+    },
+  );
+  Object.keys(auxiliaryAccount).forEach(
+    (a) => {
+      auxiliaryAccountAddressVsAccount[
+        auxiliaryAccount[a].address.toLowerCase()
+      ] = auxiliaryAccount[a];
+    },
+  );
+
+  console.log('originAddresses  ', originAddresses);
+  console.log('auxiliaryAddresses  ', auxiliaryAddresses);
+
+  const originEngine = ZeroClientProvider({
+    rpcUrl: chainConfig.originWeb3Provider,
+    getAccounts: callback => callback(null, originAddresses),
+    signTransaction: (tx, cb) => {
+      const extractRawTx = (error, response) => {
+        cb(error, response.rawTransaction);
+      };
+      console.log('tx.from  ', tx.from);
+      console.log('originAccountAddressVsAccount[tx.from]  ', originAccountAddressVsAccount[tx.from]);
+      originAccountAddressVsAccount[tx.from.toLowerCase()].signTransaction(tx, extractRawTx);
+    },
+  });
+
+  // Network connectivity error.
+  originEngine.on('error', (err) => {
+    console.error(`Provider: ${err.stack}`);
+  });
+
+  const auxiliaryEngine = ZeroClientProvider({
+    rpcUrl: chainConfig.auxiliaryWeb3Provider,
+    getAccounts: callback => callback(null, auxiliaryAddresses),
+    signTransaction: (tx, cb) => {
+      const extractRawTx = (error, response) => {
+        cb(error, response.rawTransaction);
+      };
+      console.log('tx.from  ', tx.from);
+      console.log('auxiliaryAccountAddressVsAccount[tx.from]  ', auxiliaryAccountAddressVsAccount[tx.from]);
+      auxiliaryAccountAddressVsAccount[tx.from.toLowerCase()].signTransaction(tx, extractRawTx);
+    },
+  });
+
+  // Network connectivity error.
+  auxiliaryEngine.on('error', (err) => {
+    console.error(`Provider: ${err.stack}`);
+  });
+
+  const originWeb3 = new Web3();
+  originWeb3.setProvider(originEngine);
+
+  const auxiliaryWeb3 = new Web3();
+  auxiliaryWeb3.setProvider(auxiliaryEngine);
+  return { originWeb3, auxiliaryWeb3 };
+};
 
 /**
  * Sets up the connection to the ethereum nodes to be used by the tests.
@@ -35,16 +107,24 @@ before(async () => {
     await funder.addAuxiliaryAccount('auxiliaryMasterKey', web3);
     await funder.addAuxiliaryAccount('auxiliaryWorker', web3);
 
-    const connection = await Connection.openAndUnlockAccounts(
+    console.log('shared.accounts.origin ', shared.accounts.origin);
+    const { originWeb3, auxiliaryWeb3 } = setupProvider(
       chainConfig,
-      shared.accounts.origin.originDeployer,
-      shared.accounts.auxiliary.auxiliaryDeployer,
-      funder.DEFAULT_PASSWORD,
+      shared.accounts.origin,
+      shared.accounts.auxiliary,
     );
-    shared.connection = connection;
 
-    connection.originWeb3.eth.getTransactionReceiptMined = funder.getTransactionReceiptMined;
-    connection.auxiliaryWeb3.eth.getTransactionReceiptMined = funder.getTransactionReceiptMined;
+    // Origin account and auxiliary account keys are added to make it
+    // connection backward compatible with agents.
+    shared.connection = {
+      originWeb3,
+      auxiliaryWeb3,
+      originAccount: shared.accounts.origin.originDeployer,
+      auxiliaryAccount: shared.accounts.auxiliary.auxiliaryDeployer,
+    };
+
+    originWeb3.eth.getTransactionReceiptMined = funder.getTransactionReceiptMined;
+    auxiliaryWeb3.eth.getTransactionReceiptMined = funder.getTransactionReceiptMined;
 
     const originFundRequests = Promise.all([
       funder.fundAccountFromMosaicFaucet(
@@ -69,16 +149,16 @@ before(async () => {
       originFundRequests,
       auxiliaryFundRequests,
       ropstenFaucetFundRequest,
-      connection.originWeb3,
-      connection.auxiliaryWeb3,
+      originWeb3,
+      auxiliaryWeb3,
     );
 
     shared.faucetTransactions = await funder.faucetTransactionDetails(
       receipts.txHashes.originFaucetTXHashes,
       receipts.txHashes.auxiliaryFaucetTXHashes,
       receipts.txHashes.ropstenFaucetTXHashes,
-      connection.originWeb3,
-      connection.auxiliaryWeb3,
+      originWeb3,
+      auxiliaryWeb3,
     );
   } catch (error) {
     console.log(error);

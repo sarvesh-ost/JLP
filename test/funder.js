@@ -68,7 +68,6 @@ const axios = require('axios');
 const Web3 = require('web3');
 const Mosaic = require('@openstfoundation/mosaic.js');
 
-const Account = require('../src/account');
 const { MOSAIC_FAUCET_URL, ROPSTEN_FAUCET_URL, ROPSTEN_REFUND_ADDRESS } = require('./constants');
 const shared = require('./shared');
 
@@ -84,11 +83,10 @@ const { BN } = Web3.utils;
  * @param {We3} web3 origin Web3 instance.
  */
 const addOriginAccount = async (name, web3) => {
-  const accountAddress = await Account.create(name, web3, DEFAULT_PASSWORD);
+  const account = web3.eth.accounts.create();
   shared.accounts.origin[name] = {
-    name,
+    ...account,
     chainId: ORIGIN_CHAIN_ID,
-    address: accountAddress,
   };
 };
 
@@ -98,11 +96,10 @@ const addOriginAccount = async (name, web3) => {
  * @param {We3} web3 auxiliary Web3 instance.
  */
 const addAuxiliaryAccount = async (name, web3) => {
-  const accountAddress = await Account.create(name, web3, DEFAULT_PASSWORD);
+  const account = web3.eth.accounts.create();
   shared.accounts.auxiliary[name] = {
-    name,
+    ...account,
     chainId: AUXILIARY_CHAIN_ID,
-    address: accountAddress,
   };
 };
 
